@@ -1,0 +1,29 @@
+name: stripe-commerce
+version: 0.1.0
+description: Restricted-key merchant catalog tools for Stripe, with offline previews and read-only subscription state.
+author: stripe-commerce contributors
+license: Apache-2.0
+requires_hermes: ">=0.21.0"
+provides_tools:
+  - stripe_whoami
+  - stripe_list_products
+  - stripe_create_product
+  - stripe_archive_product
+  - stripe_list_prices
+  - stripe_create_price
+  - stripe_deactivate_price
+  - stripe_create_payment_link
+  - stripe_list_payment_links
+  - stripe_deactivate_payment_link
+  - stripe_list_subscriptions
+  - stripe_get_subscription
+  - stripe_portal_config
+provides_hooks: []
+capabilities: []
+python_dependencies: []
+requires_env:
+  - STRIPE_API_KEY
+config_schema:
+  stripe_api_key:
+    type: string
+    description: Documentation only. Set STRIPE_API_KEY in the process environment or profile .env to a restricted rk_test_ or rk_live_ key. Config values are not used for credentials. Unrestricted sk_ keys are rejected at registration and every call. Never paste keys in chat.
