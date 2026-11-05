@@ -12,7 +12,9 @@ MAX_BYTES = 1024 * 1024
 KEY_HELP = "STRIPE_API_KEY must be a restricted rk_test_ or rk_live_ key. Create a restricted key in Stripe Dashboard > Developers > API keys; never paste keys in chat."
 
 class StripeError(Exception):
-    pass
+    def __init__(self, message, details=None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 def require_key():
@@ -28,6 +30,33 @@ def redact(value):
     if key:
         text = text.replace(key, "[REDACTED]")
     return re.sub(r"(?:rk|sk)_(?:test|live)_[A-Za-z0-9]+", "[REDACTED]", text)
+
+
+def error_details(response):
+    """Bounded machine-readable diagnostics, never Stripe's free-form messages."""
+    details = {}
+    try:
+        body = response.read(MAX_BYTES + 1)
+        raw = json.loads(body) if len(body) <= MAX_BYTES else None
+        error = raw.get("error") if isinstance(raw, dict) else None
+        if isinstance(error, dict):
+            for field in ("type", "code", "param"):
+                value = error.get(field)
+                # Stripe codes/types and bracketed parameter names only. Drop,
+                # rather than truncate, oversized values or credential-shaped tokens.
+                if (isinstance(value, str) and 1 <= len(value) <= 128
+                        and re.fullmatch(r"[A-Za-z0-9_\[\]]+", value)
+                        and json.loads(redact(value)) == value):
+                    details[field] = value
+    except Exception:
+        pass  # Invalid JSON, oversized or unreadable body: generic fallback.
+    try:
+        retry = response.headers.get("Retry-After")
+        if isinstance(retry, str) and len(retry) <= 64 and re.fullmatch(r"-?[0-9]+", retry):
+            details["retry_after_seconds"] = max(0, min(3600, int(retry)))
+    except Exception:
+        pass
+    return details
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -64,10 +93,11 @@ def request(method, path, params=None):
                 raise StripeError("Unexpected Stripe response.")
             return result
     except urllib.error.HTTPError as exc:
-        # Do not echo response bodies, URLs, headers, or arbitrary exception text.
+        details = error_details(exc)
+        exc.close()
         if exc.code in (401, 403):
-            raise StripeError("Stripe authorization denied (HTTP %s); check restricted-key permissions and mode." % exc.code) from None
-        raise StripeError("Stripe HTTP %s; no automatic retry. Check Dashboard before retrying a write." % exc.code) from None
+            raise StripeError("Stripe authorization denied (HTTP %s); check restricted-key permissions and mode." % exc.code, details) from None
+        raise StripeError("Stripe HTTP %s; no automatic retry. Check Dashboard before retrying a write." % exc.code, details) from None
     except StripeError:
         raise
     except Exception:

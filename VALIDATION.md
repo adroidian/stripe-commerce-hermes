@@ -1,5 +1,87 @@
 # Validation evidence
 
+## Adversarial remediation — SC-01, SC-02, SC-03
+
+The original evidence below is retained as historical baseline. This section
+supersedes its test count and its statement that no adversarial review occurred.
+Starting point: `main` at `f4d28d8`, clean working tree, 35 tests passing.
+
+### Attack reproduction and fixes
+
+- **SC-01:** Mocked Stripe readback changed monthly recurrence to yearly; changed
+  link price, quantity, completion type, redirect URL or active state; omitted
+  evidence; returned incomplete or extra line items. Previously these could
+  report `verified:true`. Readback now strictly compares requested price fields
+  (including recurrence, or explicit one-time state), link price/quantity,
+  completion behavior/URL and active state. Link readback requests
+  `expand[]=line_items` on the existing allowlisted GET endpoint; it does not add
+  an endpoint or fetch any redirect URL. Missing/incomplete evidence returns
+  `verified:false` and `unverifiable_fields`; observed differences return
+  `mismatched_fields`. Failed readback retains the accepted object ID and lists
+  unverifiable fields. Product descriptions are also checked when requested.
+  The original price happy-path fixture now supplies the recurrence it claims
+  to verify; its assertion was not removed or weakened.
+- **SC-02:** Mocked pages used non-boolean/missing `has_more`, 26 rows, empty pages
+  with more results, missing/wrong-prefix cursor IDs, duplicate rows or a request
+  cursor reappearing anywhere in the page. All now produce clear JSON pagination
+  errors. Valid empty terminal pages and 25-row pages still work. The shared
+  checks cover all five list tools. Stripe IDs are opaque, so lexical ordering
+  is deliberately not treated as chronology; the plugin rejects observable
+  repeated/regressing pages, but does not claim to detect arbitrary cycles
+  spanning independent stateless calls without supplied cursor history.
+- **SC-03:** Mocked HTTP errors proved lost currency/reference/permission codes
+  and lost 429 retry timing. Errors now retain only optional `error_details`
+  fields `type`, `code`, `param`, `retry_after_seconds`. String fields must be
+  1–128 ASCII token/bracket characters, pass existing key redaction unchanged,
+  and are dropped rather than truncated if unsafe or oversized. Retry timing
+  must be an integer header string of at most 64 characters and is clamped to
+  0–3600 seconds. Body reads remain capped at 1 MiB; malformed or oversized
+  bodies fall back to generic errors. Messages, bodies, URLs, arbitrary headers,
+  non-string values and credential-shaped values are not echoed. No retry is
+  performed, including on 429.
+
+The final 16 regression methods were exercised against the original committed
+implementation in a temporary directory: process exit **1**, `Ran 16 tests`,
+`FAILED (failures=30, errors=3)` (subtest failures are counted separately).
+The errors were missing diagnostic/unverifiable fields, not import failures.
+The same regressions pass against the fix. Baseline reproduction logs remained
+outside the repository; they contain synthetic fixtures only.
+
+### Final acceptance results
+
+```text
+python3 -m unittest discover -s tests -q
+Ran 51 tests in 3.326s
+OK
+```
+
+This includes the original 35 tests and 16 new adversarial regression methods.
+
+- `python3 -m compileall -q .`: exit 0, no output.
+- `git diff --check`: exit 0, no output.
+- `$HERMES_MAIN/.venv/bin/hermes plugins validate . --install-deps`: exit 0,
+  `Validation passed.` All manifest, registration, collision and security checks
+  passed; no new warnings. The same pre-existing host `sitecustomize` /
+  `pysqlite3._sqlite3` warning remains; host isolation remains informational.
+- `STRIPE_KEY_FILE=$STRIPE_KEY_FILE bash demo/run_demo.sh`: exit 0,
+  `PASS: 3 read-only calls; 6 offline mutation previews verified; 0 live writes.`
+  The first invocation without either credential environment variable correctly
+  failed closed (exit 1); rerun used the existing private restricted-key file,
+  with no credential printed or copied into the repository.
+- The initial commit attempt found no configured Git author identity. The final
+  commit uses the existing baseline contributor identity via command-scoped Git
+  options; no global or repository identity configuration was changed.
+
+Safety rails are unchanged: restricted `rk_` keys only on every request,
+`api.stripe.com` only, verified TLS, redirects/proxies disabled, no automatic
+retry, dry-run defaults, and no money endpoints. No live mutation was executed.
+Commercial write/readback compatibility and error variants remain
+transport-mocked, not a claim of test-mode or live-write validation. The demo
+performed only account, product-list and portal-configuration GETs. No push,
+publication or catalog submission was made.
+
+## Historical initial validation
+
 Release candidate 0.1.0. The following outputs were captured from actual local execution, not synthesized.
 
 ## Scope and environment

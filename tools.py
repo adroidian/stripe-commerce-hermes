@@ -88,9 +88,81 @@ def listing(path, params):
     rows = raw.get("data")
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise client.StripeError("Invalid Stripe list response.")
-    more = bool(raw.get("has_more", False))
+    more = raw.get("has_more")
+    if type(more) is not bool or len(rows) > 25:
+        raise client.StripeError("Invalid Stripe pagination: expected boolean has_more and at most 25 rows.")
+    prefix = {"/v1/products": "prod", "/v1/prices": "price", "/v1/payment_links": "plink",
+              "/v1/subscriptions": "sub", "/v1/billing_portal/configurations": "bpc"}[path]
+    try:
+        ids = [identifier(row.get("id"), prefix) for row in rows]
+    except client.StripeError:
+        raise client.StripeError("Invalid Stripe pagination: missing or invalid cursor ID.") from None
+    # Stripe IDs are opaque, not lexically ordered. A returned request cursor or
+    # duplicate row is evidence of a repeated/regressing page, not forward progress.
+    if len(ids) != len(set(ids)) or params.get("starting_after") in ids or (more and not ids):
+        raise client.StripeError("Invalid Stripe pagination: empty, repeated or regressing cursor; no forward progress.")
     return {"data": [project(row) for row in rows], "has_more": more,
-            "next_starting_after": rows[-1].get("id") if more and rows else None}
+            "next_starting_after": ids[-1] if more else None}
+
+
+def verify_readback(obj, object_id, prefix, body):
+    """Fail closed on absent evidence; never equate bools with integer quantities."""
+    missing, mismatched = [], []
+
+    def compare(path, expected):
+        value = obj
+        for part in path.split("."):
+            if not isinstance(value, dict) or part not in value:
+                missing.append(path)
+                return
+            value = value[part]
+        if type(value) is not type(expected) or value != expected:
+            mismatched.append(path)
+
+    compare("id", object_id)
+    if body.get("active") == "false":
+        compare("active", False)
+    elif prefix == "prod":
+        for field in ("name", "description"):
+            if field in body:
+                compare(field, body[field])
+    elif prefix == "price":
+        for field in ("product", "unit_amount", "currency"):
+            compare(field, body[field])
+        if "recurring[interval]" in body:
+            compare("recurring.interval", body["recurring[interval]"])
+        else:
+            compare("recurring", None)
+    else:
+        compare("active", True)
+        completion = body.get("after_completion[type]", "hosted_confirmation")
+        compare("after_completion.type", completion)
+        if completion == "redirect":
+            compare("after_completion.redirect.url", body["after_completion[redirect][url]"])
+        items = obj.get("line_items")
+        if not isinstance(items, dict) or type(items.get("has_more")) is not bool or not isinstance(items.get("data"), list):
+            missing.extend(["line_items.price", "line_items.quantity"])
+        elif items["has_more"]:
+            missing.append("line_items.complete")
+        elif len(items["data"]) != 1:
+            mismatched.append("line_items.count")
+        else:
+            row = items["data"][0]
+            # Reuse strict nested comparison without projecting or exposing expansions.
+            if not isinstance(row, dict):
+                missing.extend(["line_items.price", "line_items.quantity"])
+            else:
+                price = row.get("price")
+                price = price.get("id") if isinstance(price, dict) else price
+                if price is None:
+                    missing.append("line_items.price")
+                elif price != body["line_items[0][price]"]:
+                    mismatched.append("line_items.price")
+                if "quantity" not in row:
+                    missing.append("line_items.quantity")
+                elif type(row["quantity"]) is not int or row["quantity"] != 1:
+                    mismatched.append("line_items.quantity")
+    return not missing and not mismatched, missing, mismatched
 
 
 def execute(name, args):
@@ -143,13 +215,16 @@ def execute(name, args):
         raise client.StripeError("Write returned no valid object ID; check Stripe Dashboard before retrying.") from None
     read_path = "/v1/" + ("products" if prefix == "prod" else "prices" if prefix == "price" else "payment_links") + "/" + object_id
     try:
-        verified = client.request("GET", read_path)
-        expected = {"active": False} if body.get("active") == "false" else ({"name": body["name"]} if prefix == "prod" else {"product": body["product"], "unit_amount": body["unit_amount"], "currency": body["currency"]} if prefix == "price" else {})
-        ok = verified.get("id") == object_id and all(verified.get(k) == v for k, v in expected.items())
+        read_params = {"expand[]": "line_items"} if name == "stripe_create_payment_link" else None
+        verified = client.request("GET", read_path, read_params)
+        ok, missing, mismatched = verify_readback(verified, object_id, prefix, body)
         return {"id": object_id, "dry_run": False, "verified": ok, "object": project(verified),
-                "warning": None if ok else "Write accepted but readback did not match; do not blindly retry."}
+                "unverifiable_fields": missing, "mismatched_fields": mismatched,
+                "warning": None if ok else "Write accepted but readback did not establish the requested state; do not blindly retry."}
     except Exception:
+        _, missing, _ = verify_readback({}, object_id, prefix, body)
         return {"id": object_id, "dry_run": False, "verified": False,
+                "unverifiable_fields": missing,
                 "warning": "Write accepted; readback failed. Check Dashboard before any retry."}
 
 
@@ -158,7 +233,8 @@ def handler(name):
         try:
             return client.redact({"success": True, **execute(name, {} if args is None else args)})
         except client.StripeError as exc:
-            return client.redact({"success": False, "error": str(exc)})
+            return client.redact({"success": False, "error": str(exc),
+                                  **({"error_details": exc.details} if exc.details else {})})
         except Exception:
             return client.redact({"success": False, "error": "Invalid input or unexpected response; no automatic retry. Check Stripe Dashboard before retrying a write."})
     return call

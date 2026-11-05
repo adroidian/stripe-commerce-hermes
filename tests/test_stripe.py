@@ -90,7 +90,7 @@ class StripeTests(unittest.TestCase):
             self.assertFalse(self.call("stripe_create_product", name="Test", dry_run=True)["success"])
         self.open.assert_not_called()
     def test_price_encoding_and_readback(self):
-        obj = {"id": "price_New", "product": "prod_A", "unit_amount": 1299, "currency": "usd"}
+        obj = {"id": "price_New", "product": "prod_A", "unit_amount": 1299, "currency": "usd", "recurring": {"interval": "month"}}
         self.open.side_effect = [Response(obj), Response(obj)]
         result = self.call("stripe_create_price", product_id="prod_A", amount_cents=1299, currency="usd", interval="month", dry_run=False)
         self.assertTrue(result["verified"])
