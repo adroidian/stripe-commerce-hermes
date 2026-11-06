@@ -2,12 +2,14 @@
 import re
 from urllib.parse import urlsplit
 from . import stripe_client as client
+from . import write_approval
 
 S = {"type": "string"}
 B = {"type": "boolean"}
 PAGE = {"starting_after": S}
 DRY = {"dry_run": {"type": "boolean", "default": True,
-                    "description": "Default true: validate and preview, without HTTP. Set false only with merchant approval."}}
+                    "description": "Default true: offline preview. False requires original matching arguments, preview_id and fresh native human consent."},
+       "preview_id": {"type": "string", "description": "Opaque reference from this exact prior preview; not approval. Required for dry_run:false; one attempt only, expires after 300 seconds."}}
 SPECS = {
     "stripe_whoami": ("Restricted key fingerprint, mode and Stripe account ID. Read-only.", {}, []),
     "stripe_list_products": ("Read up to 25 products; follow next_starting_after when has_more.", PAGE, []),
@@ -165,8 +167,12 @@ def verify_readback(obj, object_id, prefix, body):
     return not missing and not mismatched, missing, mismatched
 
 
-def execute(name, args):
+def execute(name, args, *, session_id=None, task_id=None):
     key = client.require_key()  # Even dry runs and read-only calls enforce restricted keys.
+    # Only validated scalar values enter the immutable request. Snapshot BEFORE
+    # any blocking UI, never dereference caller-owned args after approval.
+    if isinstance(args, dict):
+        args = dict(args)
     validate(name, args)
     if name == "stripe_whoami":
         account = client.request("GET", "/v1/account")
@@ -203,10 +209,16 @@ def execute(name, args):
     else:
         collection = "products" if name == "stripe_archive_product" else "prices" if name == "stripe_deactivate_price" else "payment_links"
         path, body = "/v1/" + collection + "/" + args["id"], {"active": "false"}
+    execution_context = write_approval.context(session_id, task_id)
     if args.get("dry_run", True):
-        return {"dry_run": True, "method": "POST", "path": path, "would_create_or_update": body,
-                "note": "No API call made. No object exists from this preview; IDs, permissions, currency support and business validity are not remotely verified."}
-    created = client.request("POST", path, body)
+        return write_approval.prepare(name, args, path, body, key, execution_context)
+    pending = write_approval.claim(name, args, path, body, key, execution_context)
+    write_approval.authorize(pending, key, session_id, task_id)
+    # Use only the original immutable preview, not this call's mutable inputs.
+    path, body = pending.path, dict(pending.body)
+    created = client.request(pending.method, pending.path, encoded_body=pending.encoded,
+                             expected_key=key, idempotency_key=pending.idempotency_key,
+                             before_send=lambda: write_approval.recheck(pending, key, session_id, task_id))
     object_id = created.get("id")
     prefix = "prod" if path.startswith("/v1/products") else "price" if path.startswith("/v1/prices") else "plink"
     try:
@@ -231,7 +243,8 @@ def execute(name, args):
 def handler(name):
     def call(args=None, **kwargs):
         try:
-            return client.redact({"success": True, **execute(name, {} if args is None else args)})
+            return client.redact({"success": True, **execute(name, {} if args is None else args,
+                                 session_id=kwargs.get("session_id"), task_id=kwargs.get("task_id"))})
         except client.StripeError as exc:
             return client.redact({"success": False, "error": str(exc),
                                   **({"error_details": exc.details} if exc.details else {})})

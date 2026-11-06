@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
+from human_ui import HumanUI
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs
 
@@ -30,12 +31,24 @@ class StripeTests(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {"STRIPE_API_KEY": KEY})
         self.env.start()
+        self.human_ui = HumanUI().start()
+        self.addCleanup(self.human_ui.stop)
+        self.socket_guard = patch("socket.socket", side_effect=AssertionError("Real sockets forbidden in unit tests"))
+        self.socket_guard.start()
+        self.addCleanup(self.socket_guard.stop)
         self.transport = patch("urllib.request.OpenerDirector.open")
         self.open = self.transport.start()
         self.open.return_value = Response({"id": "acct_123"})
         self.addCleanup(self.env.stop)
         self.addCleanup(self.transport.stop)
     def call(self, tool_name, **args):
+        # Existing write/readback intents still reach the actual transport, but
+        # now explicitly preview and receive a test-only human UI response.
+        if args.get("dry_run") is False and "preview_id" not in args:
+            preview = json.loads(tools.handler(tool_name)({k: v for k, v in args.items() if k != "dry_run"}, session_id="ignored"))
+            self.assertTrue(preview["success"], preview)
+            args["preview_id"] = preview["preview_id"]
+            self.human_ui.wait.return_value = {"resolved": True, "choice": "once"}
         result = tools.handler(tool_name)(args, session_id="ignored")
         self.assertNotIn(KEY, result)
         return json.loads(result)

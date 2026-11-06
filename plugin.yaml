@@ -1,6 +1,6 @@
 name: stripe-commerce
-version: 0.1.0
-description: Restricted-key merchant catalog tools for Stripe, with offline previews and read-only subscription state.
+version: 0.2.0
+description: Restricted-key Stripe catalog tools with bound offline previews, native Telegram/Discord gateway-only writes with one-operation human consent, and read-only subscription state.
 author: stripe-commerce contributors
 license: Apache-2.0
 requires_hermes: ">=0.21.0"
@@ -26,4 +26,4 @@ requires_env:
 config_schema:
   stripe_api_key:
     type: string
-    description: Documentation only. Set STRIPE_API_KEY in the process environment or profile .env to a restricted rk_test_ or rk_live_ key. Config values are not used for credentials. Unrestricted sk_ keys are rejected at registration and every call. Never paste keys in chat.
+    description: Documentation only. Set STRIPE_API_KEY privately for the active Hermes profile to a restricted rk_test_ or rk_live_ key. Credentials resolve through agent.secret_scope.get_secret when Hermes is present; config values are never used. Resolver errors fail closed. Unrestricted sk_ keys are rejected at registration and every call. Never paste keys in chat.

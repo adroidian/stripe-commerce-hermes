@@ -1,13 +1,12 @@
 """Offline registration, with fail-closed credential validation."""
-import os
 from pathlib import Path
-from .stripe_client import require_key
+from .stripe_client import configured_key, require_key
 from .tools import SCHEMAS, handler
 
 
 def register(ctx):
     # Missing credentials are allowed for installation/doctor, never for tool use.
-    if os.environ.get("STRIPE_API_KEY"):
+    if configured_key():
         require_key()
     for name, schema in SCHEMAS.items():
         ctx.register_tool(name=name, toolset="stripe-commerce", schema=schema,

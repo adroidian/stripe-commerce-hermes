@@ -1,5 +1,233 @@
 # Validation evidence
 
+## 0.2.0 — exact preview + one-operation human consent
+
+This section supersedes earlier safety/default-demo statements. Older sections
+below are historical evidence. All current authorization/host acceptance uses
+synthetic credentials, simulated human decisions and mocked Stripe HTTP; it
+makes no claim of a new live Stripe request or real merchant approval.
+
+### R2 / Q1–Q2 — current native Telegram/Discord-only write boundary
+
+This section supersedes the CLI/generic-gateway execution and display-budget
+claims in the historical receipts below. The independent v2 quality review
+found two real shipped-UI counterexamples, despite the earlier **92 passing
+unit tests / 11 native integration checks**:
+
+- **Q1:** the real classic CLI panel can collapse even `name=Tea`, displaying
+  only three wrapped command rows plus an optional View choice. Allow once
+  remains available without viewing the form or endpoint
+  (`hermes_cli/cli_tui_mixin.py:148–230` in the reference host).
+- **Q2:** the shipped QQ card uses `command_preview[:300]`
+  (`plugins/platforms/qqbot/keyboards.py:139`). A valid product name ending in
+  `HIDDEN_TAIL` could pass the plugin's 750-character preflight but be hidden
+  on that card. The previous claim of an 800-character minimum across shipped
+  gateway renderers was false; a generic formatter test did not cover QQ.
+
+The bounded correction does not alter Hermes core or add UI machinery. All six
+writes now require the host's native platform signal to be a plain string of
+exactly `telegram` or `discord`, `_no_user_can_answer() is False`,
+`_is_gateway_approval_context() is True`, and no attributed subagent. No CLI
+callback is imported or accepted, including custom full-prompt test callbacks.
+CLI/TUI, QQ and every other unverified surface fail before native consent or
+HTTP, while reads and offline previews remain available when their baseline
+credential/context APIs work. Missing, throwing or incompatible platform APIs
+also deny writes without disabling those reads/previews.
+
+Native platform is part of the immutable preview context. A platform switch,
+including Telegram → Discord with unchanged session key/injected IDs, invalidates
+the reference before the prompt; a switch during consent or after TLS/opener
+setup invalidates it before HTTP. Claimed references remain single-use. The R1
+forced native redactor-equality preflight, 750-character scoped display cap,
+full key/profile/session/task/request binding, 300-second TTL, 256-entry cap,
+atomic claim, captured-byte transport, idempotency and strict readback remain.
+The display cap applies only to the allowlisted renderers, not a universal UI
+minimum or an attestation of arbitrary third-party/modified UI behavior.
+
+Actual offline execution for this correction, Python 3.11.15:
+
+- Pre-correction source: **92 tests, OK**.
+- Initial nine R2 regression methods against v2: **9 tests, FAILED
+  (failures=94)**, exit 1; subtest failures are counted individually. No import
+  errors. Unsupported writes reached mocked POST/GET and platform switches were
+  not bound. The pre-claim matrix was subsequently extended to unsupported →
+  supported switches as well.
+- Focused `python3 -m unittest discover -s tests -p test_preview_binding.py -v`:
+  **50 tests, OK**. The nine new methods cover all six CLI/TUI and QQ/unverified
+  refusals before UI/HTTP; all-six exact POST/readback paths on both Telegram and
+  Discord; platform changes before/during UI and after TLS; missing/incompatible
+  platform APIs; and ambiguous non-boolean human/gateway signals.
+- Full `python3 -m unittest discover -s tests -v`: **101 tests, OK**. Existing
+  write/readback tests now explicitly receive a fresh test-only gateway UI
+  response. Earlier CLI-positive binding fixtures were moved to the supported
+  gateway path; strict transport/readback assertions were retained.
+- `./demo/run_demo.sh`, exit 0:
+  `PASS: 6 exact offline previews; 19 rejected execution attempts; 0 HTTP calls; 0 real sockets; no real human consent simulated.`
+- `python3 -m compileall -q .` and `git diff --check`: exit 0.
+
+Controller acceptance reran **101 tests on Python 3.11.15 and 101 on the
+reference Hermes Python 3.14 runtime**, plus compile, the zero-HTTP demo,
+post-TLS expiry refusal, plugin validation and diff checks. Validation passes
+with the disclosed internal-API compatibility warning, not a warning-free result.
+
+The controller also exercised **11 native integration scenarios**: Telegram and
+Discord each used the real native queue/resolver/redactor and the actual final
+adapter send methods, with simulated delivery/human decisions and mocked Stripe
+HTTP. Complete request blocks survived both final cards; only once/deny controls
+were offered. CLI, QQ and unverified channels refused before UI/HTTP. The checks
+also covered platform/key/profile changes, redaction, denial/replay, immutable
+caller inputs and cron refusal under YOLO. Real socket attempts remained zero.
+
+A separate native serialization run passed **8 positive and 3 negative cases**,
+including maximal permitted escaped-display cost, encoded tails, HTML escaping,
+Discord mentions and deliberate overflow/fence failures. It ran the pinned
+reference host's real Telegram/Discord formatting, card/view construction and
+send shells with the already-installed Telegram 22.8 / Discord 2.7.1 SDKs.
+Only outbound delivery/channel lookup/settle observation were simulated. No
+package was installed, no human actually approved, and no client rendering or
+live merchant acceptance is claimed. A generic formatter or unit UI double is
+not a substitute for these final-card checks.
+
+Source freeze and independent spec/quality gates are release requirements;
+catalog admission remains the maintainer's decision. No live Stripe request,
+real merchant approval, installation or core change was performed. Raw local
+RED, focused, full-suite, native-card and demo receipts remain outside the source
+repository. The historical receipts below are retained with their limitations.
+
+### Historical R1 display-integrity review fix and acceptance
+
+An independent specification review of the initial candidate found that the
+native host redactor could hide a non-Stripe token-shaped form value while the
+plugin posted the original bytes. The old Stripe-only preflight redactor did
+not prove that a human saw the entire request. This was independently reproduced
+through the genuine CLI helper and the gateway's exact redaction wrapper:
+four synthetic cases returned success with mocked POST/GET, while the full form
+was absent from the displayed command. No real credentials or traffic were used.
+
+The plugin now calls the real native
+`agent.redact.redact_approval_display(..., force=True)` for command, description
+and title before seeking consent. Any masking/sanitization, missing API,
+incompatible result or error fails closed; the reference remains consumed.
+Host redaction is not disabled and hidden values are not revealed.
+
+- Before the correction: the expanded **41-test** binding regression file failed
+  with **8 failures**; four real-native redaction cases also failed the no-POST
+  assertion, reaching mocked HTTP despite hidden values.
+- After the correction: **92 unit tests pass** on both Python 3.11.15 and the
+  Hermes checkout's Python 3.14 runtime, including **41 binding regressions**.
+- **11 native integration checks pass**, including real CLI redaction and the
+  unchanged gateway redaction function plus actual formatter. All four synthetic
+  masked-value cases now have success false, zero consent callbacks and zero HTTP.
+  Ordinary exact-visible CLI/gateway requests still complete strict mocked readback.
+- Offline demo still reports **6 previews, 19 rejections, HTTP 0 and sockets 0**.
+  The slow-TLS expiry probe, `compileall` and `git diff --check` pass.
+- Plugin validation passes all checks, safe scan and no core overrides, with
+  **one internal-API compatibility warning**, as described below. The display
+  primitive is also feature-detected internal coupling, not a stable public seam.
+
+The initial candidate's receipts below are retained as historical evidence.
+R1's results superseded their test and host-integration totals at that time;
+R2 above is the current scope and does not treat CLI acceptance as valid consent.
+
+### Local execution and RED → GREEN
+
+- Unmodified implementation baseline:
+  `14fd9b75c113e5f7cf9849c0da9e05329ce39869`.
+  `python3 -m unittest discover -s tests -v`: **51 tests, OK**, exit 0.
+- The new regression file was first run before implementing preview enforcement:
+  **29 tests, FAILED (failures=22, errors=2)**, exit 1. Missing-preview writes
+  reached mocked HTTP, and previews had no bound identifier.
+- After the native-consent/profile/display-limit requirements were incorporated,
+  the final regression file and its test-only UI fixture were copied into an
+  isolated `git archive` of the same baseline. The production implementation
+  in that temporary directory was unchanged. Command:
+  `python3 -m unittest discover -s tests -p test_preview_binding.py -v`.
+  Actual result: **38 tests, FAILED (failures=25, errors=2)**, exit 1. Failures
+  include missing-token writes, missing bounded preview state, missing human
+  prompts, replay/race controls, oversized UI requests and profile-scoped keys.
+  Feature-field errors are part of the missing baseline behavior, not import
+  failures. Temporary baseline files were removed after execution.
+- Hardened worktree:
+  `python3 -m unittest discover -s tests -v`: **89 tests in 2.361s, OK**, exit 0.
+  These are the original 51 test methods plus 38 hardening regressions. Original
+  write/readback fixtures now explicitly preview and install a **test-only**
+  host-human UI response; readback and transport assertions were not weakened.
+- `git diff --check`: exit 0, no output.
+- `python3 -m compileall -q .`: exit 0, no output.
+- `./demo/run_demo.sh`: exit 0. Actual final line:
+  `PASS: 6 exact offline previews; 19 rejected execution attempts; 0 HTTP calls; 0 real sockets; no real human consent simulated.`
+
+Raw RED/GREEN/demo logs are retained privately outside this source repository.
+All tests are credential-free: only synthetic keys, an HTTP-entry-point mock
+and a real-socket hard stop. No secret files or real scoped secrets were read;
+no real Stripe GET or POST occurred.
+
+### What the new tests prove
+
+Real registered/exposed handlers and the actual transport/approval binding are
+invoked; the plugin's authorization function is not replaced with an automatic
+approval mock. A separate test-only host contract fixture supplies UI responses.
+Tests cover all six mutations with missing previews and missing human UI;
+all-six exact POST bytes, URL and headers followed by strict readback; changed
+fields/IDs/tool/key/mode/profile/session/task/native routing; expiry before and
+during CLI/gateway approval; 256-entry capacity and expiry cleanup; restart;
+consume on deny/UI error/network uncertainty/success; atomic concurrent claim;
+unattended/delegation/automatic-callback refusal under yolo; missing/incompatible
+host APIs; malformed native-helper results; mutable caller arguments during
+prompt; key rotation after approval; expiry/profile/interrupt changes during
+opener setup; native display overflow; secret-shaped text refusal/redaction.
+
+### Historical native host coupling and acceptance
+
+The source compatibility reference is Hermes
+`ed1afb082eb3e46cf2edae9d8f68fb67b09ee4df`. Its exact native consent implementation
+(`tools/approval_prompt.py`, `request_elicitation_consent`) was inspected along
+with the protected-instruction-file one-operation guard and the relevant
+context/credential/delegation/interrupt primitives. The plugin requests
+`remember_key=None` and only accepts the helper's exact `accept` result. The
+helper offers once/deny and does not persist consent; legacy broad UI responses,
+if any, are interpreted by the host as this call only. Generic policy approval,
+yolo, smart mode, allowlists and cached decisions are never consulted.
+
+These are **internal feature-detected APIs**, not a stable documented general
+plugin approval API. Missing/incompatible APIs fail closed for writes. Read
+and preview availability still depends on working profile credential/context
+APIs. No core monkeypatch or infrastructure change was made. Internal imports
+may generate catalog compatibility warnings; this release does not claim
+zero warnings or compatibility with every build satisfying the version floor.
+
+The earlier candidate limited escaped ASCII approval message + description +
+title + 300 reserved native UI characters to 750, putting complete
+form/mode/key reference and preview ID in the command. Its generic formatter
+probe used an 800-character command budget. **That was not a shipped-renderer
+minimum:** Q1/Q2 above disproved the universal display claim. These receipts
+are historical, not current CLI or QQ authorization evidence.
+**Initial candidate controller acceptance (before the display-integrity fix):** isolated controller runs passed
+89 unit tests on Python 3.11.15 and on the Hermes checkout's Python 3.14 runtime,
+`compileall`, `git diff --check`, and the offline demo quoted above. Nine extra
+integration checks exercised the real native CLI callback and gateway queue /
+resolver with simulated human decisions and mocked Stripe HTTP, plus the real
+host formatter at its minimum 800-character command budget. They verified
+complete request rendering, YOLO non-bypass, single use, denial, key rotation,
+immutable caller arguments, active profile-scoped credentials and cron refusal.
+An additional slow-TLS probe expired the preview during opener setup and saw
+zero HTTP calls. These are simulated decisions, not a real merchant approval
+or a live Stripe API compatibility test.
+
+`hermes plugins validate <plugin-dir> --install-deps --json` passed every check,
+including isolated registration, matching capabilities, security scan (`safe`)
+and no core overrides. It emitted **one compatibility warning**, listing the
+internal approval/context/delegation/interrupt imports above. This is an explicit
+catalog review item: Hermes does not currently provide a documented public
+plugin seam for this strict one-operation consent flow. Feature detection and
+fail-closed writes bound runtime failure; they do not make internal APIs stable.
+No zero-warning result or universal version-floor compatibility is claimed.
+
+Plugin source remains uninstalled in any live profile. No real Stripe request,
+real credential lookup or billing change was made for this release. Catalog
+schema validation, independent source review and final pinned-SHA readback are
+separate release gates.
+
 ## Adversarial remediation — SC-01, SC-02, SC-03
 
 The original evidence below is retained as historical baseline. This section
