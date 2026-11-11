@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
-from human_ui import HumanUI
+from .human_ui import HumanUI
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs
 
@@ -45,11 +45,10 @@ class StripeTests(unittest.TestCase):
         # Existing write/readback intents still reach the actual transport, but
         # now explicitly preview and receive a test-only human UI response.
         if args.get("dry_run") is False and "preview_id" not in args:
-            preview = json.loads(tools.handler(tool_name)({k: v for k, v in args.items() if k != "dry_run"}, session_id="ignored"))
+            preview = json.loads(self.human_ui.dispatch(tool_name, {k: v for k, v in args.items() if k != "dry_run"}, session_id="ignored"))
             self.assertTrue(preview["success"], preview)
             args["preview_id"] = preview["preview_id"]
-            self.human_ui.wait.return_value = {"resolved": True, "choice": "once"}
-        result = tools.handler(tool_name)(args, session_id="ignored")
+        result = self.human_ui.dispatch(tool_name, args, session_id="ignored")
         self.assertNotIn(KEY, result)
         return json.loads(result)
     def test_reject_secret_keys(self):
@@ -65,6 +64,9 @@ class StripeTests(unittest.TestCase):
     def test_registration_and_manifest_surface(self):
         class Ctx:
             def __init__(self): self.tools = []; self.skills = []
+            def session_surface(self): return ""
+            def register_hook(self, *args, **kw): pass
+            def register_middleware(self, *args, **kw): pass
             def register_tool(self, **kw): self.tools.append(kw)
             def register_skill(self, *args, **kw): self.skills.append(args)
         ctx = Ctx(); plugin.register(ctx)
@@ -73,6 +75,7 @@ class StripeTests(unittest.TestCase):
         for tool in ctx.tools:
             self.assertEqual(tool["requires_env"], ["STRIPE_API_KEY"])
             self.assertTrue(tool["check_fn"]())
+        plugin.write_approval._surface = self.human_ui.ctx.session_surface
         self.open.assert_not_called()
     def test_accept_test_key(self):
         result = self.call("stripe_whoami")
@@ -126,14 +129,17 @@ class StripeTests(unittest.TestCase):
         self.assertFalse(self.call("stripe_create_product", name="Test", dry_run=False)["verified"])
     def test_invalid_amounts(self):
         for amount in (True, 0, -1, 100000000, 1.5, "100"):
-            self.assertFalse(self.call("stripe_create_price", product_id="prod_A", amount_cents=amount, currency="usd")["success"])
+            # Raw handler contract remains strict even though native dispatch
+            # may coerce model strings before calling any plugin.
+            result = tools.handler("stripe_create_price")({"product_id": "prod_A", "amount_cents": amount, "currency": "usd"})
+            self.assertFalse(json.loads(result)["success"])
         self.open.assert_not_called()
     def test_invalid_id_no_http(self):
         for val in ("prod_A/../../refunds", "https://evil.test", "prod_A?expand=x", "price_A"):
             self.assertFalse(self.call("stripe_archive_product", id=val)["success"])
         self.open.assert_not_called()
     def test_boolean_dry_run_strict(self):
-        self.assertFalse(self.call("stripe_create_product", name="Test", dry_run="false")["success"])
+        self.assertFalse(json.loads(tools.handler("stripe_create_product")({"name": "Test", "dry_run": "false"}))["success"])
         self.open.assert_not_called()
     def test_invalid_redirects(self):
         for url in ("http://example.com", "https://u:p@example.com", "//evil.test", "https://example.com/\n"):
@@ -196,6 +202,9 @@ class StripeTests(unittest.TestCase):
         self.open.assert_not_called()
     def test_missing_key_check_and_registration(self):
         class Ctx:
+            def session_surface(self): return ""
+            def register_hook(self, *args, **kwargs): pass
+            def register_middleware(self, *args, **kwargs): pass
             def register_tool(self, **kwargs): pass
             def register_skill(self, *args, **kwargs): pass
         with patch.dict(os.environ, {"STRIPE_API_KEY": ""}):
@@ -221,7 +230,7 @@ class StripeTests(unittest.TestCase):
         self.open.return_value = response
         self.assertFalse(self.call("stripe_whoami")["success"])
     def test_unknown_tool_and_bad_args(self):
-        self.assertFalse(self.call("stripe_refund")["success"])
+        self.assertFalse(json.loads(tools.handler("stripe_refund")({}))["success"])
         self.assertFalse(json.loads(tools.handler("stripe_whoami")([]))["success"])
 
 if __name__ == "__main__": unittest.main()

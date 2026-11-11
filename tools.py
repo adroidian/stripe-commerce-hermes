@@ -167,6 +167,24 @@ def verify_readback(obj, object_id, prefix, body):
     return not missing and not mismatched, missing, mismatched
 
 
+def request_spec(name, args):
+    """One canonical request projection, reused before approval and in handler."""
+    if name == "stripe_create_product":
+        return "/v1/products", {k: args[k] for k in ("name", "description") if k in args}
+    if name == "stripe_create_price":
+        body = {"product": args["product_id"], "unit_amount": args["amount_cents"], "currency": args["currency"]}
+        if "interval" in args:
+            body["recurring[interval]"] = args["interval"]
+        return "/v1/prices", body
+    if name == "stripe_create_payment_link":
+        body = {"line_items[0][price]": args["price_id"], "line_items[0][quantity]": 1}
+        if "redirect_url" in args:
+            body.update({"after_completion[type]": "redirect", "after_completion[redirect][url]": args["redirect_url"]})
+        return "/v1/payment_links", body
+    collection = "products" if name == "stripe_archive_product" else "prices" if name == "stripe_deactivate_price" else "payment_links"
+    return "/v1/" + collection + "/" + args["id"], {"active": "false"}
+
+
 def execute(name, args, *, session_id=None, task_id=None):
     key = client.require_key()  # Even dry runs and read-only calls enforce restricted keys.
     # Only validated scalar values enter the immutable request. Snapshot BEFORE
@@ -196,24 +214,12 @@ def execute(name, args, *, session_id=None, task_id=None):
         return result
     if name == "stripe_get_subscription":
         return project(client.request("GET", "/v1/subscriptions/" + args["id"]))
-    if name == "stripe_create_product":
-        path, body = "/v1/products", {k: args[k] for k in ("name", "description") if k in args}
-    elif name == "stripe_create_price":
-        path, body = "/v1/prices", {"product": args["product_id"], "unit_amount": args["amount_cents"], "currency": args["currency"]}
-        if "interval" in args:
-            body["recurring[interval]"] = args["interval"]
-    elif name == "stripe_create_payment_link":
-        path, body = "/v1/payment_links", {"line_items[0][price]": args["price_id"], "line_items[0][quantity]": 1}
-        if "redirect_url" in args:
-            body.update({"after_completion[type]": "redirect", "after_completion[redirect][url]": args["redirect_url"]})
-    else:
-        collection = "products" if name == "stripe_archive_product" else "prices" if name == "stripe_deactivate_price" else "payment_links"
-        path, body = "/v1/" + collection + "/" + args["id"], {"active": "false"}
+    path, body = request_spec(name, args)
     execution_context = write_approval.context(session_id, task_id)
     if args.get("dry_run", True):
         return write_approval.prepare(name, args, path, body, key, execution_context)
     pending = write_approval.claim(name, args, path, body, key, execution_context)
-    write_approval.authorize(pending, key, session_id, task_id)
+    write_approval.recheck(pending, key, session_id, task_id)
     # Use only the original immutable preview, not this call's mutable inputs.
     path, body = pending.path, dict(pending.body)
     created = client.request(pending.method, pending.path, encoded_body=pending.encoded,

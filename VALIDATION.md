@@ -1,6 +1,159 @@
 # Validation evidence
 
-## 0.2.0 — exact preview + one-operation human consent
+## Current public-API migration — 0.2.0
+
+This section supersedes earlier host-qualification, warning and pending-review
+claims below. The mandatory API originated in Hermes [PR #146488](https://github.com/NousResearch/hermes-agent/pull/146488).
+The qualified implementation also requires the request-selection and delivery
+handling in [PR #153349](https://github.com/NousResearch/hermes-agent/pull/153349),
+head `826087f934aaef7ca11391101b8957f70eb8bf42`, based on
+`9373dc1e315a68446f9767afd7acd15d4c0642b8`. Both PRs remain pending; this does
+not claim released or installed-host support. The original `f2d5700` feature-only
+fixture did not pass exact native request-selection qualification.
+
+Runtime execution requires the public mandatory capability, complete exact native
+display, correlated public approval observers and a single-use execution lease.
+Missing or invalid capability blocks writes. Actual stable v0.23.0 registration,
+mocked reads and offline previews passed; execution refused before UI/network.
+An advertised host capability does not independently attest a modified host's
+implementation. There is no remembered, YOLO, ordinary-policy or private fallback.
+
+Unchanged-runtime qualification on the core head above:
+
+- Full targeted core selection: **498 passed across 26 files**. Four new/ported
+  policy, native and typed files account for 47 cases. Final typed regression
+  bytes produce 10 intended behavioral failures plus two denial controls on the
+  pre-repair feature baseline, then all 12 pass on the qualified core.
+- Plugin regressions: **209 passed across five files**, including 14 SDK display
+  checks. The simulated HumanUI answer selects the displayed request ID, as the
+  actual native callbacks do; it does not use generic FIFO approval.
+- Separate real SDK/callback consumer compositions: **22 passed**, all six
+  mutations on Telegram and Discord, exact mocked POST plus GET readback;
+  **eight** more typed/delegated cases prove generic input cannot grant pending
+  mandatory operations and a later exact B-card selection still executes only B.
+- Controller selections total **737 distinct passing cases across 33 files**
+  after overlap is removed. These are not 737 live merchant operations.
+- Independent source SPEC and QUALITY approved the implementation without open
+  Critical/Important findings. Four additional independent double-tap/replay
+  cases passed and are not added to the controller total.
+- Native CLI plugin validation: **15 checks passed, zero warnings** on the
+  qualified core. Its canonical API metadata includes the mandatory export.
+  The one-warning result on the older feature-only fixture below is historical.
+- Canonical core checks: **16 OK, zero blocking/advisory health findings**.
+  Offline demo: six previews, 19 refusals, zero HTTP and zero real sockets.
+
+Private external files run under separate clean HOME directories: a typed probe
+narrows approval configuration, and sharing HOME correctly denied native positive
+fixtures that lacked requester identity. Unmodified files passed when isolated.
+One unchanged five-second command-detection assertion took 6.34 seconds during a
+concurrent run; its full 173-case file and complete 498-case core selection then
+passed serially, without changing source or the threshold. Failed logs are retained.
+
+Only delivery, human input and merchant HTTP are simulated. These results do not
+establish live client rendering, human consent, installation or live Stripe
+acceptance. No serving profile, credential or merchant state was changed. After
+fresh Once and host execution admission, Stop cannot guarantee abort. Local guards
+run after opener/SSL-context construction and before `opener.open()`, not after a
+completed TLS handshake. Raw reports and private fixtures stay outside this repo.
+
+## Historical initial public-API candidate qualification
+
+The following receipts describe initial migration testing on feature-only source
+`f2d5700ecf1c575fac3cb0b63f5a692615962beb`. They are preserved as historical
+component evidence, not final callback-routing qualification or current warnings.
+The current section above and README identify the required integrated host.
+
+The public composition is: PluginContext hooks → actual model_tools dispatcher
+→ native mandatory fresh-once policy/queue → exact pre/post approval observer
+facts → normal tool_execution middleware → opaque one-use dynamic handler lease
+→ final request reconstruction → frozen-byte POST → unchanged strict GET
+readback. Observers are not vetoes or host-issued approval receipts. Complete
+host-redacted command **and** description must exactly equal the frozen expected
+strings with native gateway/session/turn/tool-call correlation and fresh Once.
+Missing observers, masking, custom transports, direct handlers, skipped hooks,
+middleware failure and final argument rewrites cannot mint a usable lease.
+
+The command is the host's JSON `{tool,args}` (including preview ID and every
+business argument). The compact description is mode/safe key fingerprint,
+method/fixed origin/path and **complete** sorted encoded form. Escaped ASCII
+limits are description 300, command 1000, total plus 500 reserved chrome 1800.
+Non-ASCII raw arguments and backtick fences remain preview-only. Short ordinary
+examples of **all six** mutations succeed on both Telegram and Discord; a link
+with `price_A` and `https://example.com/done` is among the positive cases.
+
+**Approved cancellation boundary:** native waiting/cancellation outcomes block.
+**After fresh Once and host admission for execution, Stop cannot guarantee abort
+of that approved operation.** No atomic post-gate/pre-handler or post-handshake
+interrupt guarantee is claimed. Local TTL/full-key/mode/home/session/task/surface
+and exact-request guards remain, including **after opener/SSL-context setup,
+immediately before request construction/network dispatch**. That point is before
+the actual TLS handshake inside `opener.open()`. Historical “post-TLS” wording
+below must not be read as completed-handshake evidence.
+
+### Executed isolated evidence
+
+Existing developer Python **3.14.4**, pytest **9.1.1**; no package installations.
+The pending core's canonical `scripts/run_tests.sh` supplied per-file isolation,
+cleared credentials and disposable homes. Plugin tests ran with
+`--import-mode=importlib` (required for this hyphenated plugin checkout).
+
+- Full current selection: **209 passed, 0 failed**, five files. The existing
+  business/readback/transport assertions remain; raw-handler strict-type checks
+  remain raw-handler checks because native dispatch can coerce model strings.
+- Actual old `2ae7b4950a8cde4c755dda933e398298eff758f3` source with the new native
+  fixture: **12 failed, 0 passed**, no import/collection errors, for the all-six
+  Telegram/Discord success regression. Migrated source: those same **12 pass**.
+- Pending core's mandatory policy regression file: **11 passed, 0 failed**.
+- Native integration covers fresh once/deny/session/always, timeout/withdrawal/
+  unavailable delivery, off/smart/YOLO/remembered policies, cron/single-query,
+  delegated callback refusal, preview replay/concurrency, separate concurrent
+  previews, before/after modify hooks, request/execution middleware rewrites,
+  direct/skipped/fail-open dispatch, missing/failed/corrupt observers, public
+  compatibility/surface failures, native provider and registered dummy Vault
+  masking, full-key/profile/session/task/surface binding, expiry at each local
+  guard, lifecycle invalidation, copied leases, actual late host callback worker
+  completion after timeout, and capacity including in-flight reservations.
+- **14 native SDK card serialization checks** are included in the total: actual
+  Telegram/Discord adapter `send_exec_approval` and card builders with the installed
+  Telegram/Discord SDK objects. Only the outbound prompt helper/human answer and
+  Stripe HTTP are simulated. Complete command/description and once/deny controls
+  survive default cards, including exact 300-character descriptions and refusal
+  at 301; every positive case performs one mocked POST and strict
+  readback. This is **not** real delivery, client-rendering or human acceptance,
+  nor qualification of arbitrary locale/mention/adapter customization.
+- Socket constructors are denied in test operation bodies, including card tests;
+  the card test event loop omits its otherwise unnecessary local wakeup socket.
+  No Stripe request, live credential use, profile mutation or core source edit.
+- Default offline demo: six previews, 19 refused direct-handler attempts,
+  **0 HTTP calls / 0 real sockets**. This proves no-lease refusal, not consent or
+  consumed-preview replay acceptance.
+- Native plugin validation: manifest/load/security/capability checks pass;
+  declared tools/hooks/middleware match actual registration. One admission-lint
+  warning remains: the pending core's static public-import allowlist does not yet
+  include its documented `hermes_cli.plugins.VALID_TOOL_APPROVAL_POLICIES` export.
+  It is disclosed, not hidden via dynamic import or an internal substitute.
+
+Reproduce from the pending Hermes checkout, using an existing test interpreter
+and private scratch HOME/TMPDIR, not a serving profile:
+
+```bash
+HERMES_PYTHON=/absolute/path/to/existing/test-python \
+  HERMES_TEST_FILE_RETRIES=0 bash scripts/run_tests.sh \
+  /absolute/path/to/stripe-commerce/tests -j 1 --tb=short --import-mode=importlib
+HERMES_PYTHON=/absolute/path/to/existing/test-python \
+  HERMES_TEST_FILE_RETRIES=0 bash scripts/run_tests.sh \
+  tests/hermes_cli/test_plugin_mandatory_approval.py -j 1 --tb=short
+```
+
+Independent SPEC/QUALITY, exact final renderer/installed-runtime qualification,
+core dependency availability, catalog admission and any real merchant-approved
+Stripe workflow remain publication/activation gates. No commit, push, catalog
+edit, PR post, installation or external effect is implied by this candidate.
+Raw logs/probes/source freeze remain outside the repository.
+
+## Historical receipts — private consent API (superseded)
+
+### Historical 0.2.0 — exact preview + one-operation human consent
 
 This section supersedes earlier safety/default-demo statements. Older sections
 below are historical evidence. All current authorization/host acceptance uses

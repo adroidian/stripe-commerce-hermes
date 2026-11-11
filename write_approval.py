@@ -1,13 +1,15 @@
-"""Process-local exact-request references, not model-issued approval grants.
+"""Public mandatory approval: frozen previews, observed display, dynamic leases.
 
-Native host consent is feature-detected at execution, never a generic policy
-approval. No files, credentials, background workers or persistent grants here.
+Observers record facts, not vetoes. Only normal post-gate execution middleware
+can mint a one-use handler lease. No private approval/context/interrupt APIs.
+After fresh Once and host admission for execution, Stop cannot guarantee abort
+of that approved operation (including during TLS setup).
 """
+from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
 import html
 import json
-import math
 import secrets
 import threading
 import time
@@ -17,14 +19,21 @@ from . import stripe_client as client
 
 TTL_SECONDS = 300
 MAX_PENDING = 256
-# Includes escaped message, description, title and conservative native chrome.
-# Conservative bound for the allowlisted native Telegram/Discord renderers
-# only; other shipped surfaces can collapse or truncate well below this limit.
-MAX_APPROVAL_DISPLAY = 750
-NATIVE_CHROME_RESERVE = 300
+# Discord's native reason budget is 300; command room is dynamic. Telegram has
+# more room. Measure escaped ASCII conservatively, including both projections.
+MAX_DESCRIPTION = 300
+MAX_COMMAND = 1000
+MAX_APPROVAL_DISPLAY = 1800
+NATIVE_CHROME_RESERVE = 500
 WRITE_PLATFORMS = frozenset({"telegram", "discord"})
-_lock = threading.Lock()
+LIFECYCLE_HOOKS = ("agent_loop_stopped", "on_session_reset", "on_session_finalize", "on_session_end", "on_session_delete")
+_lock = threading.RLock()
 _pending = {}
+_attempts = {}
+_reservations = {}
+_generation = 0
+_surface = lambda: None
+_lease: ContextVar["Lease | None"] = ContextVar("stripe_commerce_execution_lease", default=None)
 
 
 @dataclass(frozen=True)
@@ -44,37 +53,55 @@ class Preview:
     idempotency_key: str
 
 
+@dataclass
+class Attempt:
+    preview: Preview
+    ids: tuple
+    rule: str
+    command: str
+    message: str
+    pre: tuple | None = None
+    approved: bool = False
+    invalid: bool = False
+
+
+@dataclass
+class Lease:
+    attempt: Attempt
+    consumed: bool = False
+    active: bool = True
+
+
+def install(ctx):
+    global _surface
+    _surface = getattr(ctx, "session_surface", lambda: None)
+    ctx.register_hook("pre_tool_call", pre_tool_call)
+    ctx.register_hook("post_tool_call", retire_attempt)
+    ctx.register_hook("pre_approval_request", pre_approval_request)
+    ctx.register_hook("post_approval_response", post_approval_response)
+    ctx.register_middleware("tool_execution", execution_middleware)
+    for hook in LIFECYCLE_HOOKS:
+        ctx.register_hook(hook, invalidate)
+
+
 def _session_platform():
-    """Unusable host platform signals may preview, but can never authorize."""
     try:
-        from tools.approval_context import _get_session_platform
-        platform = _get_session_platform()
-        return platform if type(platform) is str else None
+        value = _surface()
+        return value if type(value) is str else None
     except Exception:
         return None
 
 
 def context(session_id=None, task_id=None):
-    """Host-owned context plus injected handler identity, where available."""
+    values = []
     for value in (session_id, task_id):
         if value is not None and (type(value) is not str or len(value) > 2000):
             raise client.StripeError("Invalid execution context.")
-    try:
-        from tools.approval_context import get_current_session_key
-    except ImportError:
-        session_key = None  # Standalone previews still work without Hermes.
-    else:
-        try:
-            session_key = get_current_session_key()
-            if type(session_key) is not str or not session_key:
-                raise ValueError("invalid host context")
-        except Exception:
-            raise client.StripeError("Cannot establish native approval session context.") from None
-    return (client.profile_home(), session_key, session_id, task_id, _session_platform())
+        values.append(value or "")  # Host hooks use empty string; handlers use None.
+    return (client.profile_home(), *values, _session_platform())
 
 
 def fingerprint(key):
-    # Complete private fingerprint binds the key/account/mode, not just its last4.
     return hashlib.sha256(key.encode("ascii")).hexdigest()
 
 
@@ -83,8 +110,12 @@ def business_arguments(args):
 
 
 def _purge(now):
-    for token in [token for token, pending in _pending.items() if now >= pending.expires]:
+    for token in [k for k, p in _pending.items() if now >= p.expires]:
         del _pending[token]
+    for rule in [k for k, a in _attempts.items() if now >= a.preview.expires]:
+        del _attempts[rule]
+    for token in [k for k, p in _reservations.items() if now >= p.expires]:
+        del _reservations[token]
 
 
 def prepare(tool, args, path, body, key, execution_context):
@@ -95,10 +126,10 @@ def prepare(tool, args, path, body, key, execution_context):
     with _lock:
         now = time.monotonic()
         _purge(now)
-        if len(_pending) >= MAX_PENDING:
+        if len(_pending) + len(_attempts) + len(_reservations) >= MAX_PENDING:
             raise client.StripeError("Pending preview limit reached (256); wait for expiry before creating another.")
         token = secrets.token_urlsafe(32)
-        while token in _pending:
+        while token in _pending or token in _reservations or any(a.preview.preview_id == token for a in _attempts.values()):
             token = secrets.token_urlsafe(32)
         pending = Preview(token, tool, business_arguments(args), client.ORIGIN, "POST", path,
                           tuple(sorted(body.items())), urlencode(sorted(body.items())).encode("ascii"),
@@ -112,106 +143,193 @@ def prepare(tool, args, path, body, key, execution_context):
             "note": "No API call made. No object exists from this preview; IDs, permissions, currency support and business validity are not remotely verified. This reference is not approval; execution requires native one-operation human consent."}
 
 
-def claim(tool, args, path, body, key, execution_context):
-    token = args.get("preview_id")
-    if not isinstance(token, str) or len(token) != 43:
-        raise client.StripeError("Execution requires the original preview_id and matching arguments.")
-    # Remove atomically BEFORE any prompt, including on mismatch. No retry grant
-    # survives denial, cancellation, error or an uncertain transport outcome.
-    with _lock:
-        pending = _pending.pop(token, None)
-        _purge(time.monotonic())
-    if pending is None:
-        raise client.StripeError("Unknown, expired or already consumed preview_id; no write attempted.")
+def match(pending, tool, args, path, body, key, execution_context):
     if time.monotonic() >= pending.expires:
         raise client.StripeError("Preview expired; no write attempted.")
-    if (pending.tool != tool or pending.arguments != business_arguments(args)
+    if (pending.tool != tool or pending.preview_id != args.get("preview_id") or args.get("dry_run") is not False
+            or pending.arguments != business_arguments(args)
             or pending.origin != client.ORIGIN or pending.origin != "https://api.stripe.com"
             or pending.method != "POST" or pending.path != path or pending.body != tuple(sorted(body.items()))
-            or pending.key_fingerprint != fingerprint(key) or pending.context != execution_context):
+            or pending.encoded != urlencode(sorted(body.items())).encode("ascii")
+            or pending.key_fingerprint != fingerprint(key)
+            or pending.mode != ("live" if key.startswith("rk_live_") else "test")
+            or pending.context != execution_context):
         raise client.StripeError("Preview does not match request, restricted key or execution context; no write attempted.")
+
+
+def _ids(kwargs):
+    return tuple(kwargs.get(k) or "" for k in ("session_id", "task_id", "turn_id", "tool_call_id", "api_request_id"))
+
+
+def _supported():
+    try:
+        from hermes_cli.plugins import VALID_TOOL_APPROVAL_POLICIES
+        return (isinstance(VALID_TOOL_APPROVAL_POLICIES, (set, frozenset))
+                and "mandatory" in VALID_TOOL_APPROVAL_POLICIES)
+    except Exception:
+        return False
+
+
+def request_message(pending):
+    # The host's independently checked command supplies tool + unique preview ID
+    # and all business args. Do not duplicate those in Discord's 300-char reason.
+    return (f"{pending.mode} key-sha256={pending.key_fingerprint[:12]}\n"
+            f"{pending.method} {pending.origin}{pending.path}\n"
+            f"form: {pending.encoded.decode('ascii')}")
+
+
+def pre_tool_call(tool_name, args, **kwargs):
+    from .tools import SPECS, validate, request_spec
+    if tool_name not in SPECS or "dry_run" not in SPECS[tool_name][1] or not isinstance(args, dict) or args.get("dry_run", True) is not False:
+        return None
+    pending = None
+    try:
+        # Reserve BEFORE validation/capability checks/approve. Even a bad or
+        # unsupported execution attempt consumes the referenced preview.
+        with _lock:
+            generation = _generation
+            pending = _pending.pop(args.get("preview_id"), None) if type(args.get("preview_id")) is str else None
+            _purge(time.monotonic())
+            if pending is not None:
+                _reservations[pending.preview_id] = pending
+        if pending is None:
+            raise client.StripeError("Unknown, expired or already consumed preview_id; no write attempted.")
+        validate(tool_name, args)
+        key = client.require_key()
+        path, body = request_spec(tool_name, args)
+        match(pending, tool_name, args, path, body, key, context(kwargs.get("session_id"), kwargs.get("task_id")))
+        ids = _ids(kwargs)
+        if (not _supported() or pending.context[3] not in WRITE_PLATFORMS
+                or not pending.context[0] or not ids[0] or not ids[2] or not ids[3]):
+            raise client.StripeError("Writes require public mandatory approval support and a native Telegram/Discord session; reads and previews remain available.")
+        command = json.dumps({"tool": tool_name, "args": args}, ensure_ascii=False, allow_nan=False)
+        message = request_message(pending)
+        # Ordinary URL form encoding is the actual wire projection, never a
+        # secret escape hatch: the raw args command must independently match
+        # the host-redacted command in the observers below.
+        if json.loads(client.redact([command, message])) != [command, message]:
+            raise client.StripeError("Request contains secret-shaped text; exact approval unavailable.")
+        if (not command.isascii() or not message.isascii()
+                or any(ord(c) < 32 and c != "\n" for c in message)
+                or "`" in command or "`" in message
+                or len(html.escape(message)) > MAX_DESCRIPTION
+                or len(html.escape(command)) > MAX_COMMAND
+                or len(html.escape(command)) + len(html.escape(message)) + NATIVE_CHROME_RESERVE > MAX_APPROVAL_DISPLAY):
+            raise client.StripeError("Exact request exceeds native approval display limit or safe character set; shorten fields and request a new preview.")
+        rule = "stripe-commerce:" + secrets.token_urlsafe(24)
+        attempt = Attempt(pending, ids, rule, command, message)
+        with _lock:
+            if (time.monotonic() >= pending.expires or generation != _generation
+                    or pending.preview_id not in _reservations):
+                raise client.StripeError("Preview expired or invalidated before approval.")
+            del _reservations[pending.preview_id]
+            _attempts[rule] = attempt
+        return {"action": "approve", "message": message, "rule_key": rule, "approval_policy": "mandatory"}
+    except client.StripeError as exc:
+        return {"action": "block", "message": str(exc)}
+    except Exception:
+        return {"action": "block", "message": "Cannot bind exact public mandatory approval; preview consumed. No write attempted."}
+    finally:
+        if pending is not None:
+            with _lock:
+                _reservations.pop(pending.preview_id, None)
+
+
+def _observe(post, **kwargs):
+    rule = kwargs.get("pattern_key", "")
+    if not isinstance(rule, str) or not rule.startswith("plugin_rule:stripe-commerce:"):
+        return
+    with _lock:
+        _purge(time.monotonic())
+        attempt = _attempts.get(rule.removeprefix("plugin_rule:"))
+        if attempt is None:
+            return
+        observed = (kwargs.get("command"), kwargs.get("description"), kwargs.get("session_key"), kwargs.get("surface"),
+                    kwargs.get("session_id"), kwargs.get("turn_id"), kwargs.get("tool_call_id"))
+        exact = (kwargs.get("command") == attempt.command and kwargs.get("description") == attempt.message
+                 and kwargs.get("pattern_keys") == [rule] and kwargs.get("surface") == "gateway"
+                 and type(kwargs.get("session_key")) is str and bool(kwargs.get("session_key"))
+                 and (kwargs.get("session_id"), kwargs.get("turn_id"), kwargs.get("tool_call_id"))
+                 == (attempt.ids[0], attempt.ids[2], attempt.ids[3])
+                 and not kwargs.get("coalesced") and not kwargs.get("cancelled"))
+        if not exact or attempt.invalid or (not post and attempt.pre is not None):
+            attempt.invalid = True
+        elif post:
+            if attempt.pre != observed or attempt.approved or kwargs.get("choice") != "once":
+                attempt.invalid = True
+            else:
+                attempt.approved = True
+        else:
+            attempt.pre = observed
+
+
+def pre_approval_request(**kwargs):
+    _observe(False, **kwargs)
+
+
+def post_approval_response(**kwargs):
+    _observe(True, **kwargs)
+
+
+def retire_attempt(**kwargs):
+    """No unused observer record survives a completed/blocked host dispatch."""
+    ids = _ids(kwargs)
+    with _lock:
+        for rule in [k for k, a in _attempts.items() if a.ids == ids]:
+            del _attempts[rule]
+
+
+def execution_middleware(tool_name, args, next_call, **kwargs):
+    from .tools import SPECS
+    if tool_name not in SPECS or "dry_run" not in SPECS[tool_name][1] or not isinstance(args, dict) or args.get("dry_run", True) is not False:
+        return next_call(args)
+    with _lock:
+        _purge(time.monotonic())
+        matches = [a for a in _attempts.values() if a.ids == _ids(kwargs) and a.preview.preview_id == args.get("preview_id")]
+        for a in matches:
+            del _attempts[a.rule]
+        if len(matches) != 1 or matches[0].invalid or not matches[0].approved or matches[0].pre is None:
+            return client.redact({"success": False, "error": "Missing exact native fresh-once approval evidence; no write attempted."})
+        lease = Lease(matches[0])
+    token = _lease.set(lease)
+    try:
+        return next_call(args)
+    finally:
+        lease.active = False  # Copied contexts cannot retain a live lease.
+        _lease.reset(token)
+
+
+def claim(tool, args, path, body, key, execution_context):
+    lease = _lease.get()
+    with _lock:
+        if lease is None or not lease.active or lease.consumed:
+            raise client.StripeError("Execution requires a normal post-gate one-use handler lease; no write attempted.")
+        lease.consumed = True
+    pending = lease.attempt.preview
+    match(pending, tool, args, path, body, key, execution_context)
     return pending
 
 
-def _human_available(execution_context):
-    """Only allowlisted native gateways, never CLI/custom/delegated callbacks."""
-    from tools.approval_context import _no_user_can_answer, _is_gateway_approval_context
-    from tools.delegate_tool_registry import get_subagent_attribution
-    if _no_user_can_answer() is not False or _is_gateway_approval_context() is not True:
-        return False
-    platform = _session_platform()
-    if platform not in WRITE_PLATFORMS or platform != execution_context[4]:
-        return False
-    return not any(get_subagent_attribution(value) for value in execution_context[1:4] if value)
-
-
-def _interrupted():
-    from tools.interrupt import is_interrupted
-    # Missing/incompatible interrupt API is caught by authorize: never assume safe.
-    return is_interrupted() is not False
-
-
 def recheck(pending, expected_key, session_id=None, task_id=None):
-    """After approval, and again immediately before constructing the POST."""
-    try:
-        if (time.monotonic() >= pending.expires or _interrupted()
-                or not _human_available(pending.context)
-                or context(session_id, task_id) != pending.context
-                or client.require_key() != expected_key
-                or fingerprint(expected_key) != pending.key_fingerprint
-                or client.ORIGIN != pending.origin):
-            raise client.StripeError("Approval became stale (expiry, key, context or interrupt); preview consumed. No write attempted.")
-    except client.StripeError:
-        raise
-    except Exception:
-        raise client.StripeError("Cannot recheck native approval context; preview consumed. No write attempted.") from None
+    """Local binding check after opener/SSL-context setup; NOT a Stop guarantee."""
+    if (time.monotonic() >= pending.expires
+            or context(session_id, task_id) != pending.context
+            or client.require_key() != expected_key
+            or fingerprint(expected_key) != pending.key_fingerprint
+            or client.ORIGIN != pending.origin or pending.origin != "https://api.stripe.com"
+            or pending.method != "POST"
+            or urlencode(sorted(pending.body)).encode("ascii") != pending.encoded):
+        raise client.StripeError("Approval became stale (expiry, key, profile, session, task, surface or request); preview consumed. No write attempted.")
 
 
-def authorize(pending, expected_key, session_id=None, task_id=None):
-    """One native human consent call, never yolo/smart/allowlist policy.
-
-    Internal MCP consent helper, not a public/stable Hermes plugin API. Host
-    maps its one-call UI answer to accept/decline/cancel; remember_key=None
-    offers no session/permanent scope and stores nothing. No model approve tool.
-    """
-    try:
-        from tools.approval_prompt import request_elicitation_consent
-        from agent.redact import redact_approval_display
-        if _interrupted() or not _human_available(pending.context):
-            raise client.StripeError("Writes require an interactive native Telegram or Discord gateway human approval channel; CLI/TUI and unverified platforms cannot execute.")
-        remaining = pending.expires - time.monotonic()
-        if remaining <= 0:
-            raise client.StripeError("Preview expired before approval.")
-        # Unique message prevents the host's identical-prompt coalescing. Form
-        # data is serialized ASCII (including escaped control characters).
-        message = (f"{pending.tool} preview={pending.preview_id}\n"
-                   f"mode={pending.mode} key-sha256={pending.key_fingerprint[:12]}\n"
-                   f"{pending.method} {pending.origin}{pending.path}\n"
-                   f"form: {pending.encoded.decode('ascii')}")
-        description = "One exact request; no saved consent."
-        title = "Approve exact Stripe request once?"
-        # Redact credential-shaped caller text before any host UI/hook sees it.
-        safe_message, safe_description = json.loads(client.redact([message, description]))
-        if (safe_message, safe_description) != (message, description):
-            raise client.StripeError("Request contains secret-shaped text that cannot be shown exactly; no write attempted.")
-        if (not message.isascii() or sum(len(html.escape(value)) for value in (message, description, title))
-                + NATIVE_CHROME_RESERVE > MAX_APPROVAL_DISPLAY):
-            raise client.StripeError("Exact request exceeds native human approval UI display limit (750 escaped ASCII characters including reserved UI space). Shorten fields and request a new preview; no write attempted.")
-        # The host also masks non-Stripe provider tokens and sanitizes display
-        # characters. A grant for its transformed display cannot authorize the
-        # original bytes. Force the strongest gateway redaction regardless of
-        # host settings; never disable it or reveal the tail.
-        for value in (message, description, title):
-            displayed = redact_approval_display(value, force=True)
-            if type(displayed) is not str or displayed != value:
-                raise client.StripeError("Native approval would mask or transform request details; exact visible consent is impossible. No write attempted.")
-        decision = request_elicitation_consent(
-            message, description, timeout_seconds=max(1, math.floor(remaining)),
-            surface="stripe-commerce", title=title, remember_key=None)
-        if type(decision) is not str or decision != "accept":
-            raise client.StripeError("Native human approval denied, cancelled, timed out or unavailable; preview consumed. No write attempted.")
-        recheck(pending, expected_key, session_id, task_id)
-    except client.StripeError:
-        raise
-    except Exception:
-        raise client.StripeError("Native one-operation human approval unavailable or incompatible; preview consumed. No write attempted.") from None
+def invalidate(session_id="", **kwargs):
+    # No reliable session identity means conservatively retire all pending state.
+    global _generation
+    with _lock:
+        _generation += 1
+        for token in [k for k, p in _pending.items() if not session_id or p.context[1] == session_id]:
+            del _pending[token]
+        for token in [k for k, p in _reservations.items() if not session_id or p.context[1] == session_id]:
+            del _reservations[token]
+        for rule in [k for k, a in _attempts.items() if not session_id or a.ids[0] == session_id]:
+            del _attempts[rule]

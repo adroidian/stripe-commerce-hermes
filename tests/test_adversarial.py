@@ -5,8 +5,8 @@ import json
 import unittest
 from urllib.error import HTTPError
 
-import test_stripe as baseline
-from test_stripe import Response, client, tools, KEY
+from . import test_stripe as baseline
+from .test_stripe import Response, client, tools, KEY
 
 
 class AdversarialTests(unittest.TestCase):

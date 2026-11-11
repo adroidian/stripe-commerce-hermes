@@ -1,6 +1,6 @@
 name: stripe-commerce
 version: 0.2.0
-description: Restricted-key Stripe catalog tools with bound offline previews, native Telegram/Discord gateway-only writes with one-operation human consent, and read-only subscription state.
+description: Restricted-key Stripe catalog tools with bound offline previews, public mandatory fresh-once approval on native Telegram/Discord (pending Hermes PR 146488; unsupported hosts read/preview-only), and read-only subscriptions.
 author: stripe-commerce contributors
 license: Apache-2.0
 requires_hermes: ">=0.21.0"
@@ -18,7 +18,18 @@ provides_tools:
   - stripe_list_subscriptions
   - stripe_get_subscription
   - stripe_portal_config
-provides_hooks: []
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_approval_request
+  - post_approval_response
+  - agent_loop_stopped
+  - on_session_reset
+  - on_session_finalize
+  - on_session_end
+  - on_session_delete
+provides_middleware:
+  - tool_execution
 capabilities: []
 python_dependencies: []
 requires_env:

@@ -36,8 +36,7 @@ def main():
     print("OFFLINE ONLY: synthetic key and symbolic IDs; no objects created or remotely verified.")
     with (patch.object(client, "configured_key", return_value="rk_test_OfflineDemoOnly1234"),
           patch("urllib.request.OpenerDirector.open", side_effect=AssertionError("Demo prohibits every HTTP request")) as http,
-          patch("socket.socket", side_effect=AssertionError("Demo prohibits real sockets")) as sockets,
-          patch.dict(sys.modules, {"tools.approval_prompt": None})):
+          patch("socket.socket", side_effect=AssertionError("Demo prohibits real sockets")) as sockets):
         previews = []
         for name, args in STEPS:
             preview = call(name, {**args, "dry_run": True})
@@ -52,7 +51,7 @@ def main():
             attempts = [
                 ("missing preview", {**args, "dry_run": False}),
                 ("no native human UI", {**args, "preview_id": preview["preview_id"], "dry_run": False}),
-                ("consumed preview replay", {**args, "preview_id": preview["preview_id"], "dry_run": False}),
+                ("direct handler still lacks execution lease", {**args, "preview_id": preview["preview_id"], "dry_run": False}),
             ]
             for reason, attempt in attempts:
                 result = call(name, attempt)

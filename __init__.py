@@ -2,12 +2,14 @@
 from pathlib import Path
 from .stripe_client import configured_key, require_key
 from .tools import SCHEMAS, handler
+from . import write_approval
 
 
 def register(ctx):
     # Missing credentials are allowed for installation/doctor, never for tool use.
     if configured_key():
         require_key()
+    write_approval.install(ctx)
     for name, schema in SCHEMAS.items():
         ctx.register_tool(name=name, toolset="stripe-commerce", schema=schema,
                           handler=handler(name), requires_env=["STRIPE_API_KEY"],

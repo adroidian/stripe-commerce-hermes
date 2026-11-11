@@ -139,7 +139,7 @@ def request(method, path, params=None, *, encoded_body=None, expected_key=None, 
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
         urllib.request.HTTPSHandler(context=ssl.create_default_context()))
     if method == "POST":
-        before_send()  # Recheck expiry/context/interrupt after opener/TLS setup too.
+        before_send()  # Local expiry/key/scope/request after opener/SSL-context setup, before network I/O (not Stop).
     # Opener/TLS construction can yield to another context. Check again before
     # constructing the request, but send the CAPTURED key, not a rotated value.
     if method == "POST" and require_key() != expected_key:
